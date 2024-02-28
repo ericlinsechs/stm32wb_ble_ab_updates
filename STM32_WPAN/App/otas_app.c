@@ -51,6 +51,7 @@ typedef struct
 
 /* Private variables ---------------------------------------------------------*/
 OTAS_APP_Context_t OTAS_APP_Context;
+static uint32_t start_address;
 
 /* Global variables ----------------------------------------------------------*/
 /* Private function prototypes -----------------------------------------------*/
@@ -88,6 +89,7 @@ void OTAS_STM_Notification( OTA_STM_Notification_t *p_notification )
           ((uint8_t*)&OTAS_APP_Context.base_address)[0] = (((uint8_t*)((OTA_STM_Base_Addr_Event_Format_t*)(p_notification->pPayload))->Base_Addr))[2];
           ((uint8_t*)&OTAS_APP_Context.base_address)[1] = (((uint8_t*)((OTA_STM_Base_Addr_Event_Format_t*)(p_notification->pPayload))->Base_Addr))[1];
           ((uint8_t*)&OTAS_APP_Context.base_address)[2] = (((uint8_t*)((OTA_STM_Base_Addr_Event_Format_t*)(p_notification->pPayload))->Base_Addr))[0];
+          start_address = (OTAS_APP_Context.base_address >> 12) & 0xff;
           OTAS_APP_Context.write_value_index = 0;
           break;
 
@@ -193,6 +195,7 @@ void OTAS_STM_Notification( OTA_STM_Notification_t *p_notification )
            * Reboot on FW Application
            */
           CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_FW_APP;
+          CFG_APP_START_SECTOR_INDEX = start_address;
  
 #ifdef OTA_SBSFU
           /* Communication with SBSFU : FW application installation by SBSFU requested */

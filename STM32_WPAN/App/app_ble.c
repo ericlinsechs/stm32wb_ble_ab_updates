@@ -675,10 +675,11 @@ static void Delete_Sectors( void )
 
   first_secure_sector_idx = (READ_BIT(FLASH->SFR, FLASH_SFR_SFSA) >> FLASH_SFR_SFSA_Pos);
 
-  if(CFG_OTA_START_SECTOR_IDX_VAL_MSG < (CFG_APP_START_SECTOR_INDEX - 1))
+  if(CFG_OTA_START_SECTOR_IDX_VAL_MSG != CFG_APP_SLOT_A_START_SECTOR_INDEX && \
+		  CFG_OTA_START_SECTOR_IDX_VAL_MSG != CFG_APP_SLOT_B_START_SECTOR_INDEX)
   {
     /**
-     * Something has been wrong as there is no case we should delete the BLE_Ota application
+     * Invalid start address
      * Reboot on the firmware application
      */
     CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_FW_APP;

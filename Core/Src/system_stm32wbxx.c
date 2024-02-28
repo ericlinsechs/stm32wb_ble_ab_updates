@@ -208,16 +208,16 @@ static void JumpSelectionOnPowerUp( void );
  * Return 0 if FW App not valid
  * Return 1 if Fw App valid
  */
-static uint8_t  CheckFwAppValidity( void );
+static uint8_t  CheckFwAppValidity( uint8_t start_sector_index );
 
 
-static uint8_t CheckFwAppValidity( void )
+static uint8_t CheckFwAppValidity( uint8_t start_sector_index )
 {
   uint8_t status;
   uint32_t magic_keyword_address;
   uint32_t last_user_flash_address;
 
-  magic_keyword_address = *(uint32_t*)(FLASH_BASE + (CFG_APP_START_SECTOR_INDEX * 0x1000 + 0x140));
+  magic_keyword_address = *(uint32_t*)(FLASH_BASE + (start_sector_index * 0x1000 + 0x140));
   last_user_flash_address = (((READ_BIT(FLASH->SFR, FLASH_SFR_SFSA) >> FLASH_SFR_SFSA_Pos) << 12) + FLASH_BASE) - 4;
   if( (magic_keyword_address < FLASH_BASE) || (magic_keyword_address > last_user_flash_address) )
   {
@@ -282,6 +282,15 @@ static void BootModeCheck( void )
 {
   if(LL_RCC_IsActiveFlag_SFTRST( ) || LL_RCC_IsActiveFlag_OBLRST( ))
   {
+    if (CFG_APP_START_SECTOR_INDEX != CFG_APP_SLOT_A_START_SECTOR_INDEX && CFG_APP_START_SECTOR_INDEX != CFG_APP_SLOT_B_START_SECTOR_INDEX)
+    {
+      /**
+       * Invaild start sector index
+       * Reset start sector to A slot
+       */
+      CFG_APP_START_SECTOR_INDEX = CFG_APP_SLOT_A_START_SECTOR_INDEX;
+      CFG_OTA_START_SECTOR_IDX_VAL_MSG = CFG_APP_START_SECTOR_INDEX;
+    }
     /**
      * The SRAM1 content is kept on Software Reset.
      * In the Ble_Ota application, the first address of the SRAM1 indicates which kind of action has been requested
@@ -290,24 +299,37 @@ static void BootModeCheck( void )
     /**
      * Check Boot Mode from SRAM1
      */
-    if((CFG_OTA_REBOOT_VAL_MSG == CFG_REBOOT_ON_FW_APP) && (CheckFwAppValidity( ) != 0))
+    else if((CFG_OTA_REBOOT_VAL_MSG == CFG_REBOOT_ON_FW_APP))
     {
-      /**
-       * The user has requested to start on the firmware application and it has been checked
-       * a valid application is ready
-       * Jump now on the application
-       */
-      JumpFwApp();
-    }
-    else if((CFG_OTA_REBOOT_VAL_MSG == CFG_REBOOT_ON_FW_APP) && (CheckFwAppValidity( ) == 0))
-    {
-      /**
-       * The user has requested to start on the firmware application but there is no valid application
-       * Erase all sectors specified by byte1 and byte1 in SRAM1 to download a new App.
-       */
-      CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_BLE_OTA_APP;     /* Request to reboot on BLE_Ota application */
-      CFG_OTA_START_SECTOR_IDX_VAL_MSG = CFG_APP_START_SECTOR_INDEX;
-      CFG_OTA_NBR_OF_SECTOR_VAL_MSG = 0xFF;
+      if (CheckFwAppValidity(CFG_APP_START_SECTOR_INDEX) != 0)
+	  {
+		/**
+		 * The user has requested to start on the firmware application and it has been checked
+		 * a valid application is ready
+		 * Jump now on the application
+		 */
+		JumpFwApp();
+	  }
+	  else if (CheckFwAppValidity(CFG_APP_START_SECTOR_INDEX ^ 0x40) != 0)
+	  {
+		/**
+		 * The slot which starts at CFG_APP_START_SECTOR_INDEX is invalid
+		 * A valid application in other slot is ready
+		 * Jump now on the application
+		 */
+		CFG_APP_START_SECTOR_INDEX ^= 0x40;
+		JumpFwApp();
+	  }
+	  else
+	  {
+		/**
+		* The user has requested to start on the firmware application but there is no valid application
+		* Erase all sectors specified by byte1 and byte1 in SRAM1 to download a new App.
+		*/
+		CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_BLE_OTA_APP;     /* Request to reboot on BLE_Ota application */
+		CFG_OTA_START_SECTOR_IDX_VAL_MSG = CFG_APP_SLOT_A_START_SECTOR_INDEX;
+		CFG_OTA_NBR_OF_SECTOR_VAL_MSG = 0xFF;
+	  }
     }
     else if(CFG_OTA_REBOOT_VAL_MSG == CFG_REBOOT_ON_BLE_OTA_APP)
     {
@@ -354,13 +376,29 @@ static void JumpSelectionOnPowerUp( void )
   /**
    * Check if there is a FW App
    */
-  if(CheckFwAppValidity( ) != 0)
+  if(CheckFwAppValidity(CFG_APP_SLOT_A_START_SECTOR_INDEX) != 0)
   {
     /**
      * The SRAM1 is random
      * Initialize SRAM1 to indicate we requested to reboot of firmware application
      */
     CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_FW_APP;
+    CFG_APP_START_SECTOR_INDEX = CFG_APP_SLOT_A_START_SECTOR_INDEX;
+
+    /**
+     * A valid application is available
+     * Jump now on the application
+     */
+    JumpFwApp();
+  }
+  else if(CheckFwAppValidity(CFG_APP_SLOT_B_START_SECTOR_INDEX) != 0)
+  {
+    /**
+     * The SRAM1 is random
+     * Initialize SRAM1 to indicate we requested to reboot of firmware application
+     */
+    CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_FW_APP;
+    CFG_APP_START_SECTOR_INDEX = CFG_APP_SLOT_B_START_SECTOR_INDEX;
 
     /**
      * A valid application is available
@@ -380,7 +418,7 @@ static void JumpSelectionOnPowerUp( void )
      * There is no valid application available
      * Erase all sectors specified by byte1 and byte1 in SRAM1 to download a new App.
      */
-    CFG_OTA_START_SECTOR_IDX_VAL_MSG = CFG_APP_START_SECTOR_INDEX;
+    CFG_OTA_START_SECTOR_IDX_VAL_MSG = CFG_APP_SLOT_A_START_SECTOR_INDEX;
     CFG_OTA_NBR_OF_SECTOR_VAL_MSG = 0xFF;
   }
   return;

@@ -138,7 +138,8 @@
 /**
  * Define the start address where the application shall be located
  */
-#define CFG_APP_START_SECTOR_INDEX          (7)
+#define CFG_APP_SLOT_A_START_SECTOR_INDEX       (0x7)
+#define CFG_APP_SLOT_B_START_SECTOR_INDEX       (0x47)
 
 /**
  * Define list of reboot reason
@@ -158,6 +159,7 @@
 #define CFG_OTA_REBOOT_VAL_MSG            (*(uint8_t*)(SRAM1_BASE+0))
 #define CFG_OTA_START_SECTOR_IDX_VAL_MSG  (*(uint8_t*)(SRAM1_BASE+1))
 #define CFG_OTA_NBR_OF_SECTOR_VAL_MSG     (*(uint8_t*)(SRAM1_BASE+2))
+#define CFG_APP_START_SECTOR_INDEX        (*(uint8_t*)(SRAM1_BASE+3))
 #endif /* OTA_SBSFU */
 
 
