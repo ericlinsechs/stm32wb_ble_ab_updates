@@ -670,6 +670,10 @@ static void Delete_Sectors( void )
    * The limit can be read from the SFSA option byte which provides the first secured sector address.
    */
 
+  /* Do not erase any sectors when there is an app available */
+  if (CFG_OTA_REBOOT_VAL_MSG == CFG_REBOOT_ON_FW_APP)
+	  return;
+
   uint32_t first_secure_sector_idx;
   uint32_t NbrOfSectorToBeErased;
 

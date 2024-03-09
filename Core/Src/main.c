@@ -92,6 +92,8 @@ int main( void )
 
   APPE_Init( );
 
+  APP_DBG_MSG("=================================BLE OTA APP=================================\n\r");
+
   while(1)
   {
     UTIL_SEQ_Run( UTIL_SEQ_DEFAULT );

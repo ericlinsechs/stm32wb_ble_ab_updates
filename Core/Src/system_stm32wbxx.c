@@ -85,6 +85,8 @@
 
 #include "app_common.h"
 #include "otp.h"
+#include "app_debug.h"
+#include "dbg_trace.h"
 
 #ifdef OTA_SBSFU
 #include "ota_sbsfu.h"
@@ -119,6 +121,13 @@
  */
 
 typedef void (*fct_t)(void);
+
+struct bootloader_control {
+   // 1 if this slot is bootable, 0 otherwise.
+    uint8_t is_bootable_slot_a;
+   // 1 if this slot is bootable, 0 otherwise.
+    uint8_t is_bootable_slot_b;
+};
 /**
  * @}
  */
@@ -144,6 +153,10 @@ extern void * g_pfnVectors;
 #define VECT_TAB_OFFSET ((uint32_t)& g_pfnVectors)
 #endif
 #endif
+
+/* Section specific to a/b bootloader management using UART */
+#define RX_BUFFER_SIZE          8U
+
 /**
  * @}
  */
@@ -183,6 +196,12 @@ const uint32_t MSIRangeTable[16UL] = {100000UL, 200000UL, 400000UL, 800000UL, 10
                                         {4UL,12UL,8UL,6UL,4UL,8UL}};
 #endif
 
+struct bootloader_control boot_ctrl;
+
+/* Section specific to a/b bootloader management using UART */
+static uint8_t aRxBuffer[RX_BUFFER_SIZE];
+static volatile char user_input = NULL;
+
 /**
  * @}
  */
@@ -204,14 +223,18 @@ static void JumpFwApp( void );
 static void BootModeCheck( void );
 static void JumpSelectionOnPowerUp( void );
 
+static void select_boot_slot(void);
+static void print_slot_status(void);
+static void rx_cplt_cb(void);
+
 /**
  * Return 0 if FW App not valid
  * Return 1 if Fw App valid
  */
-static uint8_t  CheckFwAppValidity( uint8_t start_sector_index );
+static uint8_t is_slot_bootable(uint8_t start_sector_index);
 
 
-static uint8_t CheckFwAppValidity( uint8_t start_sector_index )
+static uint8_t is_slot_bootable(uint8_t start_sector_index)
 {
   uint8_t status;
   uint32_t magic_keyword_address;
@@ -280,17 +303,17 @@ static void JumpFwApp( void )
  */
 static void BootModeCheck( void )
 {
+  /* Enable debugger */
+  APPD_Init();
+
+  APP_DBG_MSG("Welcome to A/B system bootloader!\n");
+
+  boot_ctrl.is_bootable_slot_a = is_slot_bootable(CFG_APP_SLOT_A_START_SECTOR_INDEX);
+  boot_ctrl.is_bootable_slot_b = is_slot_bootable(CFG_APP_SLOT_B_START_SECTOR_INDEX);
+  print_slot_status();
+
   if(LL_RCC_IsActiveFlag_SFTRST( ) || LL_RCC_IsActiveFlag_OBLRST( ))
   {
-    if (CFG_APP_START_SECTOR_INDEX != CFG_APP_SLOT_A_START_SECTOR_INDEX && CFG_APP_START_SECTOR_INDEX != CFG_APP_SLOT_B_START_SECTOR_INDEX)
-    {
-      /**
-       * Invaild start sector index
-       * Reset start sector to A slot
-       */
-      CFG_APP_START_SECTOR_INDEX = CFG_APP_SLOT_A_START_SECTOR_INDEX;
-      CFG_OTA_START_SECTOR_IDX_VAL_MSG = CFG_APP_START_SECTOR_INDEX;
-    }
     /**
      * The SRAM1 content is kept on Software Reset.
      * In the Ble_Ota application, the first address of the SRAM1 indicates which kind of action has been requested
@@ -299,37 +322,9 @@ static void BootModeCheck( void )
     /**
      * Check Boot Mode from SRAM1
      */
-    else if((CFG_OTA_REBOOT_VAL_MSG == CFG_REBOOT_ON_FW_APP))
+    if((CFG_OTA_REBOOT_VAL_MSG == CFG_REBOOT_ON_FW_APP))
     {
-      if (CheckFwAppValidity(CFG_APP_START_SECTOR_INDEX) != 0)
-	  {
-		/**
-		 * The user has requested to start on the firmware application and it has been checked
-		 * a valid application is ready
-		 * Jump now on the application
-		 */
-		JumpFwApp();
-	  }
-	  else if (CheckFwAppValidity(CFG_APP_START_SECTOR_INDEX ^ 0x40) != 0)
-	  {
-		/**
-		 * The slot which starts at CFG_APP_START_SECTOR_INDEX is invalid
-		 * A valid application in other slot is ready
-		 * Jump now on the application
-		 */
-		CFG_APP_START_SECTOR_INDEX ^= 0x40;
-		JumpFwApp();
-	  }
-	  else
-	  {
-		/**
-		* The user has requested to start on the firmware application but there is no valid application
-		* Erase all sectors specified by byte1 and byte1 in SRAM1 to download a new App.
-		*/
-		CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_BLE_OTA_APP;     /* Request to reboot on BLE_Ota application */
-		CFG_OTA_START_SECTOR_IDX_VAL_MSG = CFG_APP_SLOT_A_START_SECTOR_INDEX;
-		CFG_OTA_NBR_OF_SECTOR_VAL_MSG = 0xFF;
-	  }
+      select_boot_slot();
     }
     else if(CFG_OTA_REBOOT_VAL_MSG == CFG_REBOOT_ON_BLE_OTA_APP)
     {
@@ -373,54 +368,7 @@ static void BootModeCheck( void )
 
 static void JumpSelectionOnPowerUp( void )
 {
-  /**
-   * Check if there is a FW App
-   */
-  if(CheckFwAppValidity(CFG_APP_SLOT_A_START_SECTOR_INDEX) != 0)
-  {
-    /**
-     * The SRAM1 is random
-     * Initialize SRAM1 to indicate we requested to reboot of firmware application
-     */
-    CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_FW_APP;
-    CFG_APP_START_SECTOR_INDEX = CFG_APP_SLOT_A_START_SECTOR_INDEX;
-
-    /**
-     * A valid application is available
-     * Jump now on the application
-     */
-    JumpFwApp();
-  }
-  else if(CheckFwAppValidity(CFG_APP_SLOT_B_START_SECTOR_INDEX) != 0)
-  {
-    /**
-     * The SRAM1 is random
-     * Initialize SRAM1 to indicate we requested to reboot of firmware application
-     */
-    CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_FW_APP;
-    CFG_APP_START_SECTOR_INDEX = CFG_APP_SLOT_B_START_SECTOR_INDEX;
-
-    /**
-     * A valid application is available
-     * Jump now on the application
-     */
-    JumpFwApp();
-  }
-  else
-  {
-    /**
-     * The SRAM1 is random
-     * Initialize SRAM1 to indicate we requested to reboot of BLE_Ota application
-     */
-    CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_BLE_OTA_APP;
-
-    /**
-     * There is no valid application available
-     * Erase all sectors specified by byte1 and byte1 in SRAM1 to download a new App.
-     */
-    CFG_OTA_START_SECTOR_IDX_VAL_MSG = CFG_APP_SLOT_A_START_SECTOR_INDEX;
-    CFG_OTA_NBR_OF_SECTOR_VAL_MSG = 0xFF;
-  }
+  select_boot_slot();
   return;
 }
 #endif /* OTA_SBSFU */
@@ -640,6 +588,83 @@ void SystemCoreClockUpdate(void)
 
 }
 
+static void select_boot_slot(void)
+{
+  if (boot_ctrl.is_bootable_slot_a || boot_ctrl.is_bootable_slot_b) {
+    uint8_t jump_to_ble_ota = 0;
+
+    while(!jump_to_ble_ota) {
+      user_input = NULL;
+      HW_UART_Receive_IT((hw_uart_id_t)CFG_DEBUG_TRACE_UART, aRxBuffer, 1U, rx_cplt_cb);
+      APP_DBG_MSG("\nSlot A(a), Slot B(b), BLE OTA(c)\n");
+      APP_DBG_MSG("Select an app to start on: \n");
+
+      /* Wait for input from user */
+      while (!user_input);
+
+      switch (user_input)
+      {
+        case 'a': /* Request to boot on A slot app */
+          if (boot_ctrl.is_bootable_slot_a) {
+            CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_FW_APP;
+            CFG_APP_START_SECTOR_INDEX = CFG_APP_SLOT_A_START_SECTOR_INDEX;
+
+            HAL_DeInit();
+
+            JumpFwApp();
+          }
+          else {
+            APP_DBG_MSG("[ERROR] The selected app is unbootable.\n");
+          }
+          break;
+
+        case 'b': /* Request to boot on B slot app */
+          if (boot_ctrl.is_bootable_slot_b) {
+            CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_FW_APP;
+            CFG_APP_START_SECTOR_INDEX = CFG_APP_SLOT_B_START_SECTOR_INDEX;
+
+            HAL_DeInit();
+
+            JumpFwApp();
+          }
+          else {
+            APP_DBG_MSG("[ERROR] The selected app is unbootable.\n");
+          }
+          break;
+
+        case 'c': /* Request to start on BLE OTA app */
+          jump_to_ble_ota = 1;
+          break;
+
+        default:
+          APP_DBG_MSG("[ERROR] Invalid input.\n");
+          break;
+      }
+    }
+  }
+  else {
+    APP_DBG_MSG("No slots are unbootable, jump to BLE OTA APP.\n");
+    /**
+      * The user has requested to start on the firmware application but there is no valid application
+      * Erase all sectors specified by byte1 and byte1 in SRAM1 to download a new App.
+      */
+    CFG_OTA_REBOOT_VAL_MSG = CFG_REBOOT_ON_BLE_OTA_APP;     /* Request to reboot on BLE_Ota application */
+    CFG_OTA_START_SECTOR_IDX_VAL_MSG = CFG_APP_SLOT_A_START_SECTOR_INDEX;
+    CFG_OTA_NBR_OF_SECTOR_VAL_MSG = 0xFF;
+  }
+}
+
+static void print_slot_status(void)
+{
+  boot_ctrl.is_bootable_slot_a > 0 ? APP_DBG_MSG("Slot A: O\n") : APP_DBG_MSG("Slot A: X\n");
+  boot_ctrl.is_bootable_slot_b > 0 ? APP_DBG_MSG("Slot B: O\n") : APP_DBG_MSG("Slot B: X\n");
+}
+
+static void rx_cplt_cb(void)
+{
+  APP_DBG_MSG("%c\n", aRxBuffer[0]);
+  user_input = (char)aRxBuffer[0];
+}
 
 /**
  * @}

@@ -138,8 +138,8 @@
 /**
  * Define the start address where the application shall be located
  */
-#define CFG_APP_SLOT_A_START_SECTOR_INDEX       (0x7)
-#define CFG_APP_SLOT_B_START_SECTOR_INDEX       (0x47)
+#define CFG_APP_SLOT_A_START_SECTOR_INDEX       (0x8)
+#define CFG_APP_SLOT_B_START_SECTOR_INDEX       (0x48)
 
 /**
  * Define list of reboot reason
@@ -573,8 +573,8 @@ typedef enum
  * When both are set to 0, no trace are output
  * When both are set to 1,  CFG_DEBUG_TRACE_FULL is selected
  */
-#define CFG_DEBUG_TRACE_LIGHT     0
-#define CFG_DEBUG_TRACE_FULL      1
+#define CFG_DEBUG_TRACE_LIGHT     1
+#define CFG_DEBUG_TRACE_FULL      0
 
 #if (( CFG_DEBUG_TRACE != 0 ) && ( CFG_DEBUG_TRACE_LIGHT == 0 ) && (CFG_DEBUG_TRACE_FULL == 0))
 #undef CFG_DEBUG_TRACE_FULL
